@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO.Ports;
 using System.Text;
@@ -9,6 +10,7 @@ namespace RS232Lab;
 public partial class Form1 : Form
 {
     private SerialPort? _serialPort;
+    private readonly Stopwatch _pingWatch = new();
 
     private ComboBox comboPort = null!;
     private ComboBox comboBaud = null!;
@@ -16,11 +18,15 @@ public partial class Form1 : Form
     private ComboBox comboDataBits = null!;
     private ComboBox comboStopBits = null!;
     private ComboBox comboTerminator = null!;
+    private ComboBox comboHandshake = null!;
 
     private Button btnRefresh = null!;
     private Button btnOpen = null!;
     private Button btnClose = null!;
     private Button btnSend = null!;
+    private Button btnPing = null!;
+    private Button btnClearReceive = null!;
+    private Button btnClearLog = null!;
 
     private TextBox txtSend = null!;
     private RichTextBox txtReceive = null!;
@@ -36,8 +42,8 @@ public partial class Form1 : Form
 
     private void BuildUi()
     {
-        Text = "RS232 Lab";
-        Size = new Size(900, 650);
+        Text = "RS232 Lab - komunikacja przez port szeregowy";
+        Size = new Size(1550, 720);
         StartPosition = FormStartPosition.CenterScreen;
 
         var main = new TableLayoutPanel
@@ -48,78 +54,141 @@ public partial class Form1 : Form
             Padding = new Padding(10)
         };
 
+        main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        main.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
+        main.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
+
         Controls.Add(main);
+
+        var configGroup = new GroupBox
+        {
+            Text = "Konfiguracja łącza",
+            Dock = DockStyle.Top,
+            AutoSize = true
+        };
 
         var config = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
-            AutoSize = true
+            AutoSize = true,
+            Padding = new Padding(8)
         };
 
-        main.Controls.Add(config);
+        configGroup.Controls.Add(config);
+        main.Controls.Add(configGroup);
 
-        comboPort = AddCombo(config, "Port:");
-        comboBaud = AddCombo(config, "Baud:");
-        comboParity = AddCombo(config, "Parity:");
-        comboDataBits = AddCombo(config, "Data bits:");
-        comboStopBits = AddCombo(config, "Stop bits:");
-        comboTerminator = AddCombo(config, "Terminator:");
+        comboPort = AddCombo(config, "Port:", 90);
+        comboBaud = AddCombo(config, "Baud:", 90);
+        comboParity = AddCombo(config, "Parity:", 90);
+        comboDataBits = AddCombo(config, "Data bits:", 70);
+        comboStopBits = AddCombo(config, "Stop bits:", 80);
+        comboTerminator = AddCombo(config, "Terminator:", 90);
+        comboHandshake = AddCombo(config, "Handshake:", 100);
 
         btnRefresh = AddButton(config, "Odśwież", btnRefresh_Click);
         btnOpen = AddButton(config, "Otwórz", btnOpen_Click);
         btnClose = AddButton(config, "Zamknij", btnClose_Click);
 
-        var sendPanel = new FlowLayoutPanel
+        var sendGroup = new GroupBox
         {
-            Dock = DockStyle.Fill,
+            Text = "Nadawanie",
+            Dock = DockStyle.Top,
             AutoSize = true
         };
 
-        main.Controls.Add(sendPanel);
+        var sendPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            Padding = new Padding(8)
+        };
+
+        sendGroup.Controls.Add(sendPanel);
+        main.Controls.Add(sendGroup);
 
         txtSend = new TextBox
         {
             Width = 650
         };
 
-        btnSend = AddButton(sendPanel, "Wyślij", btnSend_Click);
-
-        sendPanel.Controls.Add(new Label
-        {
-            Text = "Nadawanie:",
-            AutoSize = true,
-            Padding = new Padding(0, 6, 0, 0)
-        });
-
         sendPanel.Controls.Add(txtSend);
-        sendPanel.Controls.Add(btnSend);
+
+        btnSend = AddButton(sendPanel, "Wyślij", btnSend_Click);
+        btnPing = AddButton(sendPanel, "PING", btnPing_Click);
+
+        var receiveGroup = new GroupBox
+        {
+            Text = "Odbiór",
+            Dock = DockStyle.Fill
+        };
+
+        var receivePanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            RowCount = 2
+        };
+
+        receivePanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        receivePanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         txtReceive = new RichTextBox
         {
             Dock = DockStyle.Fill,
-            Height = 250,
             ReadOnly = true
         };
 
-        main.Controls.Add(new Label
+        btnClearReceive = new Button
         {
-            Text = "Odbiór:",
-            AutoSize = true
-        });
+            Text = "Wyczyść odbiór",
+            Width = 130,
+            Height = 30
+        };
+        btnClearReceive.Click += (_, _) => txtReceive.Clear();
 
-        main.Controls.Add(txtReceive);
+        receivePanel.Controls.Add(txtReceive);
+        receivePanel.Controls.Add(btnClearReceive);
+
+        receiveGroup.Controls.Add(receivePanel);
+        main.Controls.Add(receiveGroup);
+
+        var logGroup = new GroupBox
+        {
+            Text = "Log",
+            Dock = DockStyle.Fill
+        };
+
+        var logPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            RowCount = 2
+        };
+
+        logPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        logPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         txtLog = new RichTextBox
         {
-            Dock = DockStyle.Bottom,
-            Height = 150,
+            Dock = DockStyle.Fill,
             ReadOnly = true
         };
 
-        Controls.Add(txtLog);
+        btnClearLog = new Button
+        {
+            Text = "Wyczyść log",
+            Width = 120,
+            Height = 30
+        };
+        btnClearLog.Click += (_, _) => txtLog.Clear();
+
+        logPanel.Controls.Add(txtLog);
+        logPanel.Controls.Add(btnClearLog);
+
+        logGroup.Controls.Add(logPanel);
+        main.Controls.Add(logGroup);
     }
 
-    private ComboBox AddCombo(Control parent, string label)
+    private ComboBox AddCombo(Control parent, string label, int width)
     {
         parent.Controls.Add(new Label
         {
@@ -130,7 +199,7 @@ public partial class Form1 : Form
 
         var combo = new ComboBox
         {
-            Width = 100,
+            Width = width,
             DropDownStyle = ComboBoxStyle.DropDownList
         };
 
@@ -143,7 +212,8 @@ public partial class Form1 : Form
         var button = new Button
         {
             Text = text,
-            Width = 90
+            Width = 90,
+            Height = 28
         };
 
         button.Click += click;
@@ -160,7 +230,7 @@ public partial class Form1 : Form
         });
         comboBaud.SelectedItem = "9600";
 
-        comboParity.Items.AddRange(Enum.GetNames(typeof(Parity)));
+        comboParity.Items.AddRange(new object[] { "None", "Even", "Odd" });
         comboParity.SelectedItem = "None";
 
         comboDataBits.Items.AddRange(new object[] { "7", "8" });
@@ -171,6 +241,14 @@ public partial class Form1 : Form
 
         comboTerminator.Items.AddRange(new object[] { "Brak", "CR", "LF", "CRLF" });
         comboTerminator.SelectedItem = "CRLF";
+
+        comboHandshake.Items.AddRange(new object[]
+        {
+            "Brak",
+            "RTS/CTS",
+            "XON/XOFF"
+        });
+        comboHandshake.SelectedItem = "Brak";
     }
 
     private void RefreshPorts()
@@ -201,6 +279,8 @@ public partial class Form1 : Form
 
         try
         {
+            ClosePortIfOpen();
+
             _serialPort = new SerialPort
             {
                 PortName = comboPort.SelectedItem.ToString()!,
@@ -208,16 +288,20 @@ public partial class Form1 : Form
                 DataBits = int.Parse(comboDataBits.SelectedItem!.ToString()!),
                 Parity = Enum.Parse<Parity>(comboParity.SelectedItem!.ToString()!),
                 StopBits = Enum.Parse<StopBits>(comboStopBits.SelectedItem!.ToString()!),
-                Handshake = Handshake.None,
+                Handshake = GetHandshake(),
                 Encoding = Encoding.ASCII,
                 ReadTimeout = 1000,
-                WriteTimeout = 1000
+                WriteTimeout = 1000,
+                DtrEnable = true,
+                RtsEnable = true
             };
 
             _serialPort.DataReceived += SerialPort_DataReceived;
             _serialPort.Open();
 
-            Log($"Otwarto port {_serialPort.PortName}.");
+            Log($"Otwarto port {_serialPort.PortName}: " +
+                $"{_serialPort.BaudRate}, {_serialPort.DataBits}{_serialPort.Parity.ToString()[0]}{_serialPort.StopBits}, " +
+                $"Handshake={comboHandshake.SelectedItem}");
         }
         catch (Exception ex)
         {
@@ -227,28 +311,57 @@ public partial class Form1 : Form
 
     private void btnClose_Click(object? sender, EventArgs e)
     {
-        if (_serialPort != null && _serialPort.IsOpen)
+        ClosePortIfOpen();
+    }
+
+    private void ClosePortIfOpen()
+    {
+        if (_serialPort == null)
+            return;
+
+        try
         {
-            _serialPort.Close();
-            Log("Zamknięto port.");
+            if (_serialPort.IsOpen)
+            {
+                _serialPort.DataReceived -= SerialPort_DataReceived;
+                _serialPort.Close();
+                Log("Zamknięto port.");
+            }
+
+            _serialPort.Dispose();
+            _serialPort = null;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Błąd zamykania portu: {ex.Message}");
         }
     }
 
     private void btnSend_Click(object? sender, EventArgs e)
     {
-        if (_serialPort == null || !_serialPort.IsOpen)
-        {
-            MessageBox.Show("Port nie jest otwarty.");
-            return;
-        }
+        SendText(txtSend.Text, true);
+    }
 
-        string text = txtSend.Text;
-        string data = text + GetTerminator();
+    private void btnPing_Click(object? sender, EventArgs e)
+    {
+        if (!IsPortReady())
+            return;
+
+        _pingWatch.Restart();
+        SendText("PING", true);
+        Log("Wysłano PING.");
+    }
+
+    private void SendText(string text, bool addTerminator)
+    {
+        if (!IsPortReady())
+            return;
 
         try
         {
-            _serialPort.Write(data);
-            Log($"TX: {text}");
+            string data = addTerminator ? text + GetTerminator() : text;
+            _serialPort!.Write(data);
+            Log($"TX: {EscapeForLog(data)}");
         }
         catch (Exception ex)
         {
@@ -258,15 +371,62 @@ public partial class Form1 : Form
 
     private void SerialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
     {
-        if (_serialPort == null) return;
+        if (_serialPort == null)
+            return;
 
-        string data = _serialPort.ReadExisting();
-
-        BeginInvoke(() =>
+        try
         {
-            txtReceive.AppendText(data);
-            Log($"RX: {data}");
-        });
+            string data = _serialPort.ReadExisting();
+
+            BeginInvoke(() =>
+            {
+                txtReceive.AppendText(data);
+                Log($"RX: {EscapeForLog(data)}");
+
+                HandlePingPong(data);
+            });
+        }
+        catch
+        {
+            // Przy zamykaniu portu może pojawić się wyjątek, ignorujemy.
+        }
+    }
+
+    private void HandlePingPong(string data)
+    {
+        if (_serialPort == null || !_serialPort.IsOpen)
+            return;
+
+        if (data.Contains("PING"))
+        {
+            SendText("PONG", true);
+            Log("Odebrano PING, odesłano PONG.");
+        }
+
+        if (data.Contains("PONG") && _pingWatch.IsRunning)
+        {
+            _pingWatch.Stop();
+            Log($"Odebrano PONG. Round trip delay = {_pingWatch.ElapsedMilliseconds} ms.");
+        }
+    }
+
+    private bool IsPortReady()
+    {
+        if (_serialPort != null && _serialPort.IsOpen)
+            return true;
+
+        MessageBox.Show("Port nie jest otwarty.");
+        return false;
+    }
+
+    private Handshake GetHandshake()
+    {
+        return comboHandshake.SelectedItem?.ToString() switch
+        {
+            "RTS/CTS" => Handshake.RequestToSend,
+            "XON/XOFF" => Handshake.XOnXOff,
+            _ => Handshake.None
+        };
     }
 
     private string GetTerminator()
@@ -280,8 +440,24 @@ public partial class Form1 : Form
         };
     }
 
+    private static string EscapeForLog(string text)
+    {
+        return text
+            .Replace("\r", "\\r")
+            .Replace("\n", "\\n");
+    }
+
     private void Log(string message)
     {
+        if (txtLog == null)
+            return;
+
         txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        ClosePortIfOpen();
+        base.OnFormClosing(e);
     }
 }
