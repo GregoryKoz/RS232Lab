@@ -11,6 +11,7 @@ public partial class Form1 : Form
 {
     private SerialPort? _serialPort;
     private readonly Stopwatch _pingWatch = new();
+    private readonly StringBuilder _receiveBuffer = new();
 
     private ComboBox comboPort = null!;
     private ComboBox comboBaud = null!;
@@ -20,6 +21,11 @@ public partial class Form1 : Form
     private ComboBox comboTerminator = null!;
     private ComboBox comboHandshake = null!;
 
+    private TextBox txtCustomTerminator = null!;
+    private TextBox txtSend = null!;
+    private RichTextBox txtReceive = null!;
+    private RichTextBox txtLog = null!;
+
     private Button btnRefresh = null!;
     private Button btnOpen = null!;
     private Button btnClose = null!;
@@ -27,10 +33,6 @@ public partial class Form1 : Form
     private Button btnPing = null!;
     private Button btnClearReceive = null!;
     private Button btnClearLog = null!;
-
-    private TextBox txtSend = null!;
-    private RichTextBox txtReceive = null!;
-    private RichTextBox txtLog = null!;
 
     public Form1()
     {
@@ -84,6 +86,22 @@ public partial class Form1 : Form
         comboDataBits = AddCombo(config, "Data bits:", 70);
         comboStopBits = AddCombo(config, "Stop bits:", 80);
         comboTerminator = AddCombo(config, "Terminator:", 90);
+
+        config.Controls.Add(new Label
+        {
+            Text = "Własny:",
+            AutoSize = true,
+            Padding = new Padding(8, 6, 0, 0)
+        });
+
+        txtCustomTerminator = new TextBox
+        {
+            Width = 70,
+            Text = "\\r\\n"
+        };
+
+        config.Controls.Add(txtCustomTerminator);
+
         comboHandshake = AddCombo(config, "Handshake:", 100);
 
         btnRefresh = AddButton(config, "Odśwież", btnRefresh_Click);
@@ -144,7 +162,11 @@ public partial class Form1 : Form
             Width = 130,
             Height = 30
         };
-        btnClearReceive.Click += (_, _) => txtReceive.Clear();
+        btnClearReceive.Click += (_, _) =>
+        {
+            txtReceive.Clear();
+            _receiveBuffer.Clear();
+        };
 
         receivePanel.Controls.Add(txtReceive);
         receivePanel.Controls.Add(btnClearReceive);
@@ -239,13 +261,14 @@ public partial class Form1 : Form
         comboStopBits.Items.AddRange(new object[] { "One", "Two" });
         comboStopBits.SelectedItem = "One";
 
-        comboTerminator.Items.AddRange(new object[] { "Brak", "CR", "LF", "CRLF" });
+        comboTerminator.Items.AddRange(new object[] { "Brak", "CR", "LF", "CRLF", "Własny" });
         comboTerminator.SelectedItem = "CRLF";
 
         comboHandshake.Items.AddRange(new object[]
         {
             "Brak",
             "RTS/CTS",
+            "DTR/DSR",
             "XON/XOFF"
         });
         comboHandshake.SelectedItem = "Brak";
@@ -280,6 +303,7 @@ public partial class Form1 : Form
         try
         {
             ClosePortIfOpen();
+            _receiveBuffer.Clear();
 
             _serialPort = new SerialPort
             {
@@ -292,8 +316,8 @@ public partial class Form1 : Form
                 Encoding = Encoding.ASCII,
                 ReadTimeout = 1000,
                 WriteTimeout = 1000,
-                DtrEnable = true,
-                RtsEnable = true
+                DtrEnable = comboHandshake.SelectedItem?.ToString() == "DTR/DSR",
+                RtsEnable = comboHandshake.SelectedItem?.ToString() == "RTS/CTS"
             };
 
             _serialPort.DataReceived += SerialPort_DataReceived;
@@ -301,7 +325,7 @@ public partial class Form1 : Form
 
             Log($"Otwarto port {_serialPort.PortName}: " +
                 $"{_serialPort.BaudRate}, {_serialPort.DataBits}{_serialPort.Parity.ToString()[0]}{_serialPort.StopBits}, " +
-                $"Handshake={comboHandshake.SelectedItem}");
+                $"Handshake={comboHandshake.SelectedItem}, Terminator={comboTerminator.SelectedItem}");
         }
         catch (Exception ex)
         {
@@ -381,14 +405,43 @@ public partial class Form1 : Form
             BeginInvoke(() =>
             {
                 txtReceive.AppendText(data);
-                Log($"RX: {EscapeForLog(data)}");
-
-                HandlePingPong(data);
+                ProcessReceivedData(data);
             });
         }
         catch
         {
-            // Przy zamykaniu portu może pojawić się wyjątek, ignorujemy.
+            // Ignorujemy wyjątki przy zamykaniu portu.
+        }
+    }
+
+    private void ProcessReceivedData(string data)
+    {
+        _receiveBuffer.Append(data);
+
+        string terminator = GetTerminator();
+
+        if (string.IsNullOrEmpty(terminator))
+        {
+            Log($"RX: {EscapeForLog(data)}");
+            HandlePingPong(data);
+            return;
+        }
+
+        while (true)
+        {
+            string buffer = _receiveBuffer.ToString();
+            int index = buffer.IndexOf(terminator, StringComparison.Ordinal);
+
+            if (index < 0)
+                break;
+
+            string message = buffer[..index];
+
+            _receiveBuffer.Clear();
+            _receiveBuffer.Append(buffer[(index + terminator.Length)..]);
+
+            Log($"RX FRAME: {EscapeForLog(message)}");
+            HandlePingPong(message);
         }
     }
 
@@ -436,8 +489,17 @@ public partial class Form1 : Form
             "CR" => "\r",
             "LF" => "\n",
             "CRLF" => "\r\n",
+            "Własny" => DecodeCustomTerminator(txtCustomTerminator.Text),
             _ => ""
         };
+    }
+
+    private string DecodeCustomTerminator(string text)
+    {
+        return text
+            .Replace("\\r", "\r")
+            .Replace("\\n", "\n")
+            .Replace("\\t", "\t");
     }
 
     private static string EscapeForLog(string text)
